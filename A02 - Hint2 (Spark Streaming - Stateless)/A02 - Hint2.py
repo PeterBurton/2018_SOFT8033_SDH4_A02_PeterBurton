@@ -13,15 +13,93 @@
 import time
 from pyspark.streaming import StreamingContext
 import json
+from __future__ import division
 
+# ------------------------------------------
+# FUNCTION parse_function
+# ------------------------------------------
+def parse_function(x):
+  cuisine = x["cuisine"]
+  evaluation = x["evaluation"]
+  points = x["points"]
+  
+  return(cuisine,(points,evaluation))
 
+# ------------------------------------------
+# FUNCTION get_totals
+# ------------------------------------------
+def get_totals(x):
+  reviews = 0
+  negreviews = 0
+  points = 0
+  for i in x[1]:
+    reviews = reviews+1
+    if i[1][1] == "Positive":
+      points = points + i[1][0]
+    else:
+      negreviews = negreviews+1
+      points = points - i[1][0]
+  
+  average = points/reviews
+  
+  return (x[0],(reviews, negreviews, points, average))
+
+# ------------------------------------------
+# FUNCTION filter_data
+# ------------------------------------------
+def filter_data(x,percentage_f, average):
+  #if reviews <=average
+  if x[1][0] <= average:
+    return False
+  #elif negreviews/reviews*100 > percentage_f
+  elif x[1][1]/x[1][0]*100 > percentage_f:
+    return False
+  else:
+    return True
+
+# ------------------------------------------
+# FUNCTION process_time_step
+# ------------------------------------------
+def process_time_step(rdd):
+  #persist rdd for averages calculation
+  rdd.cache()
+  #If the RDD has data
+  if rdd.count()>0:
+    #Parse data to give following tuple with nested tuples: (cuisine,(points,evaluation)), and then group by cuisine
+    grouped_rdd = rdd.map(lambda x: parse_function(x)).groupBy(lambda x: x[0])
+    
+    #Get total reviews, total neg reviews, total points and average
+    #tuple returned is (cuisine,(reviews, negreviews, points, average))
+    totals_rdd = grouped_rdd.map(lambda x: get_totals(x))
+    #print(totals_rdd.take(10))
+    #Persist totals_rdd for average calculation
+    totals_rdd.cache()
+  
+    #Calculate the average
+    average = rdd.count()/totals_rdd.count()
+    
+    #Filter out entries that don't meet criteria in the spec and sort by average points per review descending
+    filtered_rdd = totals_rdd.filter(lambda x: filter_data(x,percentage_f, average)).sortBy(lambda x: -x[1][3])
+    
+    return filtered_rdd
 
 # ------------------------------------------
 # FUNCTION my_model
 # ------------------------------------------
 def my_model(ssc, monitoring_dir, result_dir, percentage_f):
-    pass
+    #Read input_stream from monitoring_dir
+    input_stream = ssc.textFileStream(monitoring_dir)
+    #Convert to Python dictionary with json.loads
+    dict_stream = input_stream.map(lambda x: json.loads(x))
+    #Transform operation to make output_stream basically using code from hint one in process_time_step function
+    output_stream = dict_stream.transform(lambda rdd: process_time_step(rdd))
+    
+    output_stream.pprint()
+    #Save to result_dir
+    output_stream.saveAsTextFiles(result_dir)
+    
 
+    
 # ------------------------------------------
 # FUNCTION create_ssc
 # ------------------------------------------
@@ -96,14 +174,18 @@ def streaming_simulation(source_dir, monitoring_dir, time_step_interval, verbose
     # 1. We get the names of the files on source_dir
     files = get_source_dir_file_names(source_dir, verbose)
 
+    start = time.time()
+    count = 0
     # 2. We simulate the dynamic arriving of such these files from source_dir to dataset_dir
     # (i.e, the files are moved one by one for each time period, simulating their generation).
     for file in files:
-        # 2.1. We copy the file from source_dir to dataset_dir
-        dbutils.fs.cp(source_dir + file, monitoring_dir + file, False)
+        count += 1
+        
+        # 2.1. We copy the file from source_dir to dataset_dir#
+        dbutils.fs.cp(source_dir + file, monitoring_dir + file)
 
         # 2.2. We wait the desired transfer_interval
-        time.sleep(time_step_interval)
+        time.sleep(start+(count*time_step_interval)-time.time())
 
 
 # ------------------------------------------
