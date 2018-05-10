@@ -93,7 +93,9 @@ def my_model(ssc, monitoring_dir, result_dir, percentage_f):
     dict_stream = input_stream.map(lambda x: json.loads(x))
     #Transform operation to make output_stream basically using code from hint one in process_time_step function
     output_stream = dict_stream.transform(lambda rdd: process_time_step(rdd))
-    
+    #Persist output_stream as it's being used in two output operations
+    output_stream.cache
+    #debug so I can see what's going on
     output_stream.pprint()
     #Save to result_dir
     output_stream.saveAsTextFiles(result_dir)

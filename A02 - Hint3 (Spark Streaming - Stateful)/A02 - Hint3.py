@@ -90,12 +90,14 @@ def process_time_step(rdd):
 def my_model(ssc, monitoring_dir, result_dir, percentage_f, window_duration, sliding_duration):
     #Read input_stream from monitoring_dir
     input_stream = ssc.textFileStream(monitoring_dir)
+    #Set the window so we process files for the year
+    window_stream = input_stream.window(window_duration * time_step_interval, sliding_duration * time_step_interval)
     #Convert to Python dictionary with json.loads
-    dict_stream = input_stream.map(lambda x: json.loads(x))
-    #Set the window so we process files for the quarter
-    window_stream = dict_stream.window(window_duration * time_step_interval, sliding_duration * time_step_interval)
+    dict_stream = window_stream.map(lambda x: json.loads(x))
     #Transform operation to make output_stream basically using code from hint one in process_time_step function
-    output_stream = window_stream.transform(lambda rdd: process_time_step(rdd))
+    output_stream = dict_stream.transform(lambda rdd: process_time_step(rdd))
+    #Persist output_stream as it's being used in two output operations
+    output_stream.cache
     #debug so I can see what's going on
     output_stream.pprint()
     #Save to result_dir
